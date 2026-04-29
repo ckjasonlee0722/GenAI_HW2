@@ -1,10 +1,9 @@
 // lib/tools.ts
-// AI SDK tool definitions. 模型自己決定要不要呼叫。
-// 我們做三個 tool：
-//   1. web_search          — 用免費的 DuckDuckGo Instant Answer API（不用 key）
+// AI SDK tool definitions. 所有 execute 都回 string（Groq 對 tool result 要求 string content）。
+// 三個 tool：
+//   1. web_search          — DuckDuckGo Instant Answer API
 //   2. recall_memory       — 主動查 user 的長期記憶
 //   3. calculate           — 安全的數學計算
-// MCP tools 由 chat route 額外從 MCP client 取得後 merge 進來。
 
 import { tool } from 'ai';
 import { z } from 'zod';
@@ -23,7 +22,7 @@ export const webSearchTool = tool({
         `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`,
       );
       const data = await res.json();
-      return {
+      const result = {
         abstract: data.AbstractText || '(no abstract)',
         source: data.AbstractURL || '',
         related: (data.RelatedTopics || [])
@@ -31,8 +30,9 @@ export const webSearchTool = tool({
           .map((t: { Text?: string }) => t.Text)
           .filter(Boolean),
       };
+      return JSON.stringify(result);
     } catch (e) {
-      return { error: 'search failed', detail: String(e) };
+      return JSON.stringify({ error: 'search failed', detail: String(e) });
     }
   },
 });
@@ -58,8 +58,8 @@ export function buildRecallMemoryTool(
         .eq('user_id', userId);
       if (key_pattern) q = q.ilike('key', `%${key_pattern}%`);
       const { data, error } = await q.limit(20);
-      if (error) return { error: error.message };
-      return { memories: data ?? [] };
+      if (error) return JSON.stringify({ error: error.message });
+      return JSON.stringify({ memories: data ?? [] });
     },
   });
 }
@@ -72,16 +72,15 @@ export const calculatorTool = tool({
     expression: z.string().describe('e.g. "(12 + 5) * 3.14"'),
   }),
   execute: async ({ expression }) => {
-    // 嚴格白名單：只允許數字、運算子、小數點、空白、括號
     if (!/^[\d+\-*/(). \s]+$/.test(expression)) {
-      return { error: 'expression contains illegal characters' };
+      return JSON.stringify({ error: 'expression contains illegal characters' });
     }
     try {
       // eslint-disable-next-line no-new-func
       const result = Function(`"use strict"; return (${expression});`)();
-      return { result };
+      return JSON.stringify({ result });
     } catch (e) {
-      return { error: String(e) };
+      return JSON.stringify({ error: String(e) });
     }
   },
 });

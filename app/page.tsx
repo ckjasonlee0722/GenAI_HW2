@@ -1,15 +1,11 @@
 // app/page.tsx
 'use client';
 
-/**
- * GenAI HW2 — main chat page
- * 串起所有 v2 功能：routing badge、memory drawer、multimodal upload、
- * tool call 可視化、branching。
- */
-
+import { useRouter } from 'next/navigation';
+import { createSupabaseBrowser } from '@/lib/supabase-browser';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Brain,
   GitFork,
@@ -19,11 +15,16 @@ import {
   Cpu,
   Sparkles,
   X,
+  LogOut,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import MemoryDrawer from './components/MemoryDrawer';
 import BranchSidebar, { BranchInfo } from './components/BranchSidebar';
+
+type SendPart =
+  | { type: 'text'; text: string }
+  | { type: 'file'; mediaType: string; url: string; filename: string };
 
 interface RoutingBadge {
   model: string;
@@ -33,6 +34,22 @@ interface RoutingBadge {
 }
 
 export default function ChatPage() {
+  // ----- auth guard -----
+  const router = useRouter();
+  const [authChecked, setAuthChecked] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  useEffect(() => {
+    const supabase = createSupabaseBrowser();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) {
+        router.push('/login');
+      } else {
+        setUserEmail(user.email ?? null);
+        setAuthChecked(true);
+      }
+    });
+  }, [router]);
+
   // ----- conversation / branch state -----
   const [conversationId] = useState(() => crypto.randomUUID());
   const [branchId, setBranchId] = useState(conversationId);
@@ -65,7 +82,6 @@ export default function ChatPage() {
           body: { messages, conversationId, branchId, parentId: null },
         };
       },
-      // capture routing headers from response
       fetch: async (input, init) => {
         const res = await fetch(input, init);
         setRouting({
@@ -84,14 +100,13 @@ export default function ChatPage() {
   // ----- send handler -----
   const handleSend = async () => {
     if (!draft.trim() && !pendingImage) return;
-    const parts: Array<
-      | { type: 'text'; text: string }
-      | { type: 'file'; mediaType: string; url: string; filename: string }
-    > = [];
+    const parts: SendPart[] = [];
     if (pendingImage) {
+      const mimeMatch = pendingImage.dataUrl.match(/^data:([^;]+);base64,/);
+      const realMime = mimeMatch?.[1] ?? 'image/png';
       parts.push({
         type: 'file',
-        mediaType: 'image/png',
+        mediaType: realMime,
         url: pendingImage.dataUrl,
         filename: pendingImage.name,
       });
@@ -119,10 +134,10 @@ export default function ChatPage() {
   // ----- branching -----
   const forkFrom = (msgId: string) => {
     const newBranchId = crypto.randomUUID();
-    // 找出 msgId 之前的訊息（含），複製給新 branch
     const idx = messages.findIndex((m) => m.id === msgId);
     if (idx < 0) return;
-    const trimmed = messages.slice(0, idx + 1);
+    // 截斷在 fork 點之前（不含），讓 user 重新打不同的問題
+    const trimmed = messages.slice(0, idx);
     setMessages(trimmed);
     setBranchId(newBranchId);
     setBranches((bs) => [
@@ -137,6 +152,31 @@ export default function ChatPage() {
     ]);
   };
 
+  // ----- switch to existing branch (load its history from Supabase) -----
+  const switchBranch = async (targetBranchId: string) => {
+    if (targetBranchId === branchId) return;
+    setBranchId(targetBranchId);
+    setBranches((bs) =>
+      bs.map((b) => ({ ...b, isActive: b.branchId === targetBranchId })),
+    );
+
+    try {
+      const res = await fetch(`/api/messages?branch_id=${targetBranchId}`);
+      if (!res.ok) return;
+      const { messages: rows } = await res.json();
+      const reconstructed = (rows ?? []).map(
+        (row: { id: string; role: string; content: string }) => ({
+          id: row.id,
+          role: row.role as 'user' | 'assistant',
+          parts: [{ type: 'text' as const, text: row.content }],
+        }),
+      );
+      setMessages(reconstructed as unknown as typeof messages);
+    } catch (e) {
+      console.error('switchBranch error:', e);
+    }
+  };
+
   // auto-scroll
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -145,6 +185,14 @@ export default function ChatPage() {
       behavior: 'smooth',
     });
   }, [messages]);
+
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-[var(--color-text-faint)] text-sm">
+        loading…
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col relative">
@@ -157,7 +205,10 @@ export default function ChatPage() {
             </div>
             <div>
               <h1 className="font-display text-2xl leading-none italic">
-                GenAI <span className="not-italic font-mono text-base text-[var(--color-text-dim)]">v2</span>
+                GenAI{' '}
+                <span className="not-italic font-mono text-base text-[var(--color-text-dim)]">
+                  v2
+                </span>
               </h1>
               <p className="text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-faint)] mt-0.5">
                 memory · multimodal · routing · tools · mcp · branching
@@ -166,8 +217,11 @@ export default function ChatPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            {routing && (
-              <RoutingBadge {...routing} />
+            {routing && <RoutingBadge {...routing} />}
+            {userEmail && (
+              <span className="text-[10px] text-[var(--color-text-faint)] font-mono mr-1 hidden sm:inline">
+                {userEmail}
+              </span>
             )}
             <button
               onClick={() => setMemoryOpen(true)}
@@ -176,13 +230,23 @@ export default function ChatPage() {
               <Brain size={13} />
               Memory
             </button>
+            <button
+              onClick={async () => {
+                const supabase = createSupabaseBrowser();
+                await supabase.auth.signOut();
+                router.push('/login');
+              }}
+              className="px-3 py-1.5 text-xs border border-[var(--color-border)] hover:border-red-400/40 hover:text-red-300 rounded-md flex items-center gap-2 transition"
+              title="Sign out"
+            >
+              <LogOut size={13} />
+            </button>
           </div>
         </div>
       </header>
 
       {/* ============ Body ============ */}
       <div className="flex-1 flex max-w-6xl mx-auto w-full">
-        {/* messages */}
         <main
           ref={scrollRef}
           className="flex-1 overflow-y-auto px-6 py-8 space-y-6"
@@ -199,7 +263,7 @@ export default function ChatPage() {
           )}
         </main>
 
-        <BranchSidebar branches={branches} onSelect={setBranchId} />
+        <BranchSidebar branches={branches} onSelect={switchBranch} />
       </div>
 
       {/* ============ Composer ============ */}
@@ -263,8 +327,15 @@ export default function ChatPage() {
             </button>
           </div>
           <p className="text-[10px] text-[var(--color-text-faint)] mt-2 text-center">
-            Press <kbd className="px-1 py-0.5 border border-[var(--color-border)] rounded text-[9px]">Enter</kbd> to send
-            · <kbd className="px-1 py-0.5 border border-[var(--color-border)] rounded text-[9px]">Shift+Enter</kbd> for newline
+            Press{' '}
+            <kbd className="px-1 py-0.5 border border-[var(--color-border)] rounded text-[9px]">
+              Enter
+            </kbd>{' '}
+            to send ·{' '}
+            <kbd className="px-1 py-0.5 border border-[var(--color-border)] rounded text-[9px]">
+              Shift+Enter
+            </kbd>{' '}
+            for newline
           </p>
         </div>
       </footer>
@@ -280,16 +351,39 @@ export default function ChatPage() {
 
 function Welcome() {
   const features = [
-    { icon: Brain, t: 'Long-term memory', d: 'I remember facts about you across sessions.' },
-    { icon: ImagePlus, t: 'Multimodal', d: 'Drop an image — auto-routes to a vision model.' },
-    { icon: Cpu, t: 'Auto routing', d: 'Each query goes to the best-fit model.' },
-    { icon: Wrench, t: 'Tools + MCP', d: 'Web search, calculator, memory recall, MCP server.' },
-    { icon: GitFork, t: 'Branch conversations', d: 'Fork from any message to explore alternates.' },
+    {
+      icon: Brain,
+      t: 'Long-term memory',
+      d: 'I remember facts about you across sessions.',
+    },
+    {
+      icon: ImagePlus,
+      t: 'Multimodal',
+      d: 'Drop an image — auto-routes to a vision model.',
+    },
+    {
+      icon: Cpu,
+      t: 'Auto routing',
+      d: 'Each query goes to the best-fit model.',
+    },
+    {
+      icon: Wrench,
+      t: 'Tools + MCP',
+      d: 'Web search, calculator, memory recall, MCP server.',
+    },
+    {
+      icon: GitFork,
+      t: 'Branch conversations',
+      d: 'Fork from any message to explore alternates.',
+    },
   ];
   return (
     <div className="rise space-y-6 max-w-2xl mx-auto pt-8">
       <h2 className="font-display text-5xl leading-tight">
-        Hello. <span className="italic text-[var(--color-text-dim)]">What shall we explore today?</span>
+        Hello.{' '}
+        <span className="italic text-[var(--color-text-dim)]">
+          What shall we explore today?
+        </span>
       </h2>
       <div className="grid sm:grid-cols-2 gap-3">
         {features.map((f, i) => (

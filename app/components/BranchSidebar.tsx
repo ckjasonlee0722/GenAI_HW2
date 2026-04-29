@@ -18,8 +18,7 @@ export default function BranchSidebar({
   branches: BranchInfo[];
   onSelect: (id: string) => void;
 }) {
-  if (branches.length <= 1) return null;
-
+  
   return (
     <aside className="border-l border-[var(--color-border)] bg-[var(--color-surface)]/60 px-4 py-5 w-60 hidden lg:block">
       <h3 className="text-xs uppercase tracking-widest text-[var(--color-text-faint)] mb-3 flex items-center gap-2">

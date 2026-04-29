@@ -16,11 +16,16 @@ import {
   Sparkles,
   X,
   LogOut,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import MemoryDrawer from './components/MemoryDrawer';
 import BranchSidebar, { BranchInfo } from './components/BranchSidebar';
+import ConversationSidebar, {
+  ConversationItem,
+} from './components/ConversationSidebar';
 
 type SendPart =
   | { type: 'text'; text: string }
@@ -50,8 +55,27 @@ export default function ChatPage() {
     });
   }, [router]);
 
+  // ----- theme -----
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = localStorage.getItem('theme') as 'dark' | 'light' | null;
+    if (saved) {
+      setTheme(saved);
+      document.documentElement.classList.toggle('light', saved === 'light');
+    }
+  }, []);
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    document.documentElement.classList.toggle('light', next === 'light');
+    localStorage.setItem('theme', next);
+  };
+
   // ----- conversation / branch state -----
-  const [conversationId] = useState(() => crypto.randomUUID());
+  const [conversationId, setConversationId] = useState(() =>
+    crypto.randomUUID(),
+  );
   const [branchId, setBranchId] = useState(conversationId);
   const [branches, setBranches] = useState<BranchInfo[]>([
     {
@@ -72,6 +96,24 @@ export default function ChatPage() {
   const [routing, setRouting] = useState<RoutingBadge | null>(null);
   const [draft, setDraft] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // ----- conversation list state -----
+  const [conversations, setConversations] = useState<ConversationItem[]>([]);
+
+  const loadConversations = async () => {
+    try {
+      const res = await fetch('/api/conversations');
+      if (!res.ok) return;
+      const { conversations: list } = await res.json();
+      setConversations(list);
+    } catch (e) {
+      console.error('loadConversations error:', e);
+    }
+  };
+
+  useEffect(() => {
+    if (authChecked) loadConversations();
+  }, [authChecked]);
 
   // ----- AI SDK chat -----
   const { messages, sendMessage, status, setMessages } = useChat({
@@ -96,6 +138,61 @@ export default function ChatPage() {
   });
 
   const isStreaming = status === 'streaming' || status === 'submitted';
+
+  // 訊息流結束後 refresh sidebar
+  useEffect(() => {
+    if (!isStreaming && messages.length > 0) loadConversations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStreaming]);
+
+  // ----- new conversation -----
+  const newConversation = () => {
+    const newId = crypto.randomUUID();
+    setConversationId(newId);
+    setBranchId(newId);
+    setMessages([]);
+    setBranches([
+      {
+        branchId: newId,
+        messageCount: 0,
+        firstAt: new Date().toISOString(),
+        isActive: true,
+        label: 'main',
+      },
+    ]);
+    setRouting(null);
+  };
+
+  // ----- switch conversation -----
+  const switchConversation = async (targetId: string) => {
+    if (targetId === conversationId) return;
+    setConversationId(targetId);
+    setBranchId(targetId);
+    setBranches([
+      {
+        branchId: targetId,
+        messageCount: 0,
+        firstAt: new Date().toISOString(),
+        isActive: true,
+        label: 'main',
+      },
+    ]);
+    try {
+      const res = await fetch(`/api/messages?branch_id=${targetId}`);
+      if (!res.ok) return;
+      const { messages: rows } = await res.json();
+      const reconstructed = (rows ?? []).map(
+        (row: { id: string; role: string; content: string }) => ({
+          id: row.id,
+          role: row.role as 'user' | 'assistant',
+          parts: [{ type: 'text' as const, text: row.content }],
+        }),
+      );
+      setMessages(reconstructed as unknown as typeof messages);
+    } catch (e) {
+      console.error('switchConversation error:', e);
+    }
+  };
 
   // ----- send handler -----
   const handleSend = async () => {
@@ -136,7 +233,6 @@ export default function ChatPage() {
     const newBranchId = crypto.randomUUID();
     const idx = messages.findIndex((m) => m.id === msgId);
     if (idx < 0) return;
-    // 截斷在 fork 點之前（不含），讓 user 重新打不同的問題
     const trimmed = messages.slice(0, idx);
     setMessages(trimmed);
     setBranchId(newBranchId);
@@ -152,14 +248,12 @@ export default function ChatPage() {
     ]);
   };
 
-  // ----- switch to existing branch (load its history from Supabase) -----
   const switchBranch = async (targetBranchId: string) => {
     if (targetBranchId === branchId) return;
     setBranchId(targetBranchId);
     setBranches((bs) =>
       bs.map((b) => ({ ...b, isActive: b.branchId === targetBranchId })),
     );
-
     try {
       const res = await fetch(`/api/messages?branch_id=${targetBranchId}`);
       if (!res.ok) return;
@@ -198,7 +292,7 @@ export default function ChatPage() {
     <div className="min-h-screen flex flex-col relative">
       {/* ============ Header ============ */}
       <header className="border-b border-[var(--color-border)] bg-[var(--color-surface)]/40 backdrop-blur-md sticky top-0 z-30 rise">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="size-8 rounded-md bg-gradient-to-br from-[var(--color-accent)] to-[var(--color-accent-2)] flex items-center justify-center">
               <Sparkles size={16} className="text-black" />
@@ -224,6 +318,13 @@ export default function ChatPage() {
               </span>
             )}
             <button
+              onClick={toggleTheme}
+              className="px-2.5 py-1.5 text-xs border border-[var(--color-border)] hover:border-[var(--color-accent)]/40 rounded-md transition"
+              title="Toggle theme"
+            >
+              {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
+            </button>
+            <button
               onClick={() => setMemoryOpen(true)}
               className="px-3 py-1.5 text-xs border border-[var(--color-border)] hover:border-[var(--color-accent)]/40 rounded-md flex items-center gap-2 transition"
             >
@@ -246,10 +347,16 @@ export default function ChatPage() {
       </header>
 
       {/* ============ Body ============ */}
-      <div className="flex-1 flex max-w-6xl mx-auto w-full">
+      <div className="flex-1 flex w-full">
+        <ConversationSidebar
+          conversations={conversations}
+          activeId={conversationId}
+          onSelect={switchConversation}
+          onNew={newConversation}
+        />
         <main
           ref={scrollRef}
-          className="flex-1 overflow-y-auto px-6 py-8 space-y-6"
+          className="flex-1 overflow-y-auto px-6 py-8 space-y-6 max-w-4xl mx-auto"
         >
           {messages.length === 0 && <Welcome />}
           {messages.map((m) => (
@@ -268,7 +375,7 @@ export default function ChatPage() {
 
       {/* ============ Composer ============ */}
       <footer className="border-t border-[var(--color-border)] bg-[var(--color-surface)]/40 backdrop-blur-md sticky bottom-0">
-        <div className="max-w-6xl mx-auto px-6 py-4">
+        <div className="max-w-4xl mx-auto px-6 py-4">
           {pendingImage && (
             <div className="mb-3 inline-flex items-center gap-2 bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-md p-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -346,8 +453,6 @@ export default function ChatPage() {
 }
 
 /* =================================================================== */
-/*                            Sub-components                             */
-/* =================================================================== */
 
 function Welcome() {
   const features = [
@@ -361,11 +466,7 @@ function Welcome() {
       t: 'Multimodal',
       d: 'Drop an image — auto-routes to a vision model.',
     },
-    {
-      icon: Cpu,
-      t: 'Auto routing',
-      d: 'Each query goes to the best-fit model.',
-    },
+    { icon: Cpu, t: 'Auto routing', d: 'Each query goes to the best-fit model.' },
     {
       icon: Wrench,
       t: 'Tools + MCP',

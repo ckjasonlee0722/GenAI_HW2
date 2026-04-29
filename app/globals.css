@@ -12,9 +12,23 @@
   --color-text: #e4e4e7;
   --color-text-dim: #a1a1aa;
   --color-text-faint: #71717a;
-  --color-accent: #a78bfa;       /* violet — main brand */
-  --color-accent-2: #fbbf24;     /* amber — secondary highlights */
+  --color-accent: #a78bfa;
+  --color-accent-2: #fbbf24;
   --color-success: #34d399;
+}
+
+/* Light mode override */
+html.light {
+  --color-bg: #fafaf9;
+  --color-surface: #ffffff;
+  --color-surface-2: #f4f4f5;
+  --color-border: #e4e4e7;
+  --color-text: #18181b;
+  --color-text-dim: #52525b;
+  --color-text-faint: #a1a1aa;
+  --color-accent: #7c3aed;
+  --color-accent-2: #d97706;
+  color-scheme: light;
 }
 
 @layer base {
@@ -32,7 +46,6 @@
     min-height: 100vh;
   }
 
-  /* Scrollbars */
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
@@ -44,7 +57,6 @@
   ::-webkit-scrollbar-thumb:hover { background: #3a3a42; background-clip: content-box; }
 }
 
-/* Subtle grain overlay — adds editorial texture */
 .grain::before {
   content: "";
   position: fixed;
@@ -55,7 +67,6 @@
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
 }
 
-/* Streaming cursor */
 @keyframes blink { 50% { opacity: 0; } }
 .streaming-cursor::after {
   content: "▊";
@@ -64,7 +75,6 @@
   color: var(--color-accent);
 }
 
-/* Markdown content */
 .prose-chat p { margin: 0.5em 0; line-height: 1.65; }
 .prose-chat p:first-child { margin-top: 0; }
 .prose-chat p:last-child { margin-bottom: 0; }
@@ -87,10 +97,9 @@
 .prose-chat pre code { background: transparent; border: 0; padding: 0; }
 .prose-chat ul, .prose-chat ol { margin: 0.5em 0; padding-left: 1.5em; }
 .prose-chat li { margin: 0.2em 0; }
-.prose-chat strong { color: #fff; font-weight: 600; }
+.prose-chat strong { color: var(--color-text); font-weight: 600; }
 .prose-chat a { color: var(--color-accent); text-decoration: underline; text-underline-offset: 3px; }
 
-/* Page-load reveal */
 @keyframes rise {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }

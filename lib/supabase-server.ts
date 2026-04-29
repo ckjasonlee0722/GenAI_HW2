@@ -1,7 +1,7 @@
 // lib/supabase-server.ts
 // Server-side Supabase client for Route Handlers (Next.js 16 async cookies)
 
-import { createServerClient } from '@supabase/ssr';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
 export async function createSupabaseServer() {
@@ -13,7 +13,9 @@ export async function createSupabaseServer() {
     {
       cookies: {
         getAll: () => cookieStore.getAll(),
-        setAll: (toSet) => {
+        setAll: (
+          toSet: Array<{ name: string; value: string; options?: CookieOptions }>,
+        ) => {
           try {
             toSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options),
